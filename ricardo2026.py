@@ -310,7 +310,7 @@ BLANK_ITEM = {"qty": "", "pack": "CASE", "desc": "", "price": ""}
 
 def safe_items():
     try:
-        raw = st.session_state.get("items", None)
+        raw = st.session_state["items"] if "items" in st.session_state else None
         if not isinstance(raw, list) or len(raw) == 0:
             return [BLANK_ITEM.copy()]
         return [i if isinstance(i, dict) else BLANK_ITEM.copy() for i in raw]

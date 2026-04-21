@@ -627,4 +627,4 @@ with tab1:
 with tab2:
     customers_tab()
 with tab3:
-    company_settings_tab()
+    company_settings_tab()        

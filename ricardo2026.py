@@ -295,7 +295,7 @@ def send_invoice_email(smtp_user, smtp_pass, recipients, subject, body, pdf_byte
     msg.attach(att)
 
     ctx = ssl.create_default_context()
-    with smtplib.SMTP("smtp.office365.com", 587) as server:
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
         server.ehlo()
         server.starttls(context=ctx)
         server.login(smtp_user, smtp_pass)
@@ -380,10 +380,10 @@ def company_settings_tab():
             if LOGO_FILE.exists(): LOGO_FILE.unlink()
 
     st.markdown("---")
-    st.subheader("Email credentials (Outlook / Office 365)")
-    co["smtp_user"] = st.text_input("Your Outlook email address", co.get("smtp_user",""))
-    co["smtp_pass"] = st.text_input("App password", co.get("smtp_pass",""), type="password",
-        help="Use an app-specific password from your Microsoft account security settings.")
+    st.subheader("Email credentials (Gmail)")
+    co["smtp_user"] = st.text_input("Your Gmail address", co.get("smtp_user",""))
+    co["smtp_pass"] = st.text_input("Gmail app password", co.get("smtp_pass",""), type="password",
+        help="Generate a 16-character app password at myaccount.google.com → Security → App passwords")
 
     if st.button("💾  Save company settings", type="primary"):
         save_company(co)
@@ -573,7 +573,7 @@ def invoice_tab():
     smtp_pass = co.get("smtp_pass","")
 
     if not smtp_user or not smtp_pass:
-        st.warning("Set your Outlook email and app password in the **Company Settings** tab first.")
+        st.warning("Set your Gmail address and app password in the **Company Settings** tab first.")
     else:
         default_recipients = cust_email
         recipients_raw = st.text_input(

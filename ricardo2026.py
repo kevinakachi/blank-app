@@ -11,12 +11,12 @@ from datetime import date, timedelta
 from pathlib import Path
 import io
 
-# ── WeasyPrint for PDF generation ──
+# ── PDF generation via fpdf2 ──
 try:
-    from weasyprint import HTML as WP_HTML
-    HAS_WEASYPRINT = True
+    from fpdf import FPDF
+    HAS_FPDF = True
 except Exception:
-    HAS_WEASYPRINT = False
+    HAS_FPDF = False
 
 # ── Paths ── (works locally and on Streamlit Cloud)
 DATA_DIR = Path(__file__).parent / "data"
@@ -262,44 +262,273 @@ def build_invoice_html(inv, company, logo_b64):
 
 
 # ══════════════════════════════════════
-# PDF generation
+# PDF generation (fpdf2 — no system deps)
 # ══════════════════════════════════════
 
+def build_invoice_pdf(inv, company, logo_b64) -> bytes:
+    """Build a clean invoice PDF using fpdf2."""
+    from fpdf import FPDF
+
+    ORANGE  = (212, 131, 26)
+    BLACK   = (26, 26, 26)
+    WHITE   = (255, 255, 255)
+    LTGRAY  = (249, 249, 249)
+    MIDGRAY = (224, 224, 224)
+    DKGRAY  = (100, 100, 100)
+
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=False)
+    pdf.set_margins(15, 15, 15)
+
+    W = 180  # usable width
+
+    # ── Logo ──
+    logo_h = 18
+    logo_w = 0
+    if logo_b64:
+        try:
+            import base64 as _b64, tempfile, os
+            logo_bytes = _b64.b64decode(logo_b64)
+            suffix = ".png"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp.write(logo_bytes)
+                tmp_path = tmp.name
+            pdf.image(tmp_path, x=15, y=15, h=logo_h)
+            logo_w = logo_h * 1.6 + 4
+            os.unlink(tmp_path)
+        except Exception:
+            logo_w = 0
+
+    # ── Company info (left) ──
+    pdf.set_xy(15 + logo_w, 15)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_text_color(*BLACK)
+    pdf.cell(80, 6, company.get("name", ""), ln=True)
+    pdf.set_x(15 + logo_w)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(*DKGRAY)
+    if company.get("tagline"):
+        pdf.cell(80, 4.5, company.get("tagline",""), ln=True)
+        pdf.set_x(15 + logo_w)
+    pdf.cell(80, 4.5, company.get("address",""), ln=True)
+    pdf.set_x(15 + logo_w)
+    pdf.cell(80, 4.5, company.get("city",""), ln=True)
+    for line in (company.get("phone","") or "").split("\n"):
+        pdf.set_x(15 + logo_w)
+        pdf.cell(80, 4.5, line.strip(), ln=True)
+
+    # ── Invoice # (right) ──
+    pdf.set_xy(120, 15)
+    pdf.set_font("Helvetica", "", 7)
+    pdf.set_text_color(*DKGRAY)
+    pdf.cell(75, 4, "INVOICE #", align="R", ln=True)
+    pdf.set_xy(120, 19)
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.set_text_color(*BLACK)
+    pdf.cell(75, 8, inv.get("inv_num",""), align="R", ln=True)
+
+    # Meta table right
+    meta = [
+        ("Ship Date:",     inv.get("ship_date","")),
+        ("Delivery Date:", inv.get("del_date","")),
+        ("Pay Terms:",     company.get("pay_terms","")),
+        ("Sale Terms:",    company.get("sale_terms","")),
+    ]
+    y = 28
+    for label, val in meta:
+        pdf.set_xy(120, y)
+        pdf.set_font("Helvetica", "", 7.5)
+        pdf.set_text_color(*DKGRAY)
+        pdf.cell(40, 4.5, label, align="R")
+        pdf.set_font("Helvetica", "", 7.5)
+        pdf.set_text_color(*BLACK)
+        pdf.cell(35, 4.5, val, align="R", ln=True)
+        y += 4.5
+
+    # ── Thick divider ──
+    y_div = 46
+    pdf.set_draw_color(*BLACK)
+    pdf.set_line_width(0.6)
+    pdf.line(15, y_div, 195, y_div)
+    pdf.set_line_width(0.2)
+
+    # ── Bill To / Ship To ──
+    y_addr = y_div + 3
+    for col, label in [(15, "BILL TO:"), (105, "SHIP TO:")]:
+        pdf.set_xy(col, y_addr)
+        pdf.set_fill_color(*ORANGE)
+        pdf.set_text_color(*WHITE)
+        pdf.set_font("Helvetica", "B", 7)
+        pdf.cell(30, 4.5, label, fill=True)
+        pdf.set_text_color(*BLACK)
+        pdf.set_font("Helvetica", "", 8)
+        lines = [inv.get("cust_name","")] + (inv.get("cust_addr","") or "").split("\n") + [inv.get("cust_phone","")]
+        yy = y_addr + 5.5
+        for ln in lines:
+            if ln.strip():
+                pdf.set_xy(col, yy)
+                pdf.cell(80, 4, ln.strip())
+                yy += 4
+
+    y_meta = y_addr + 22
+
+    # ── Cust PO / meta bar ──
+    bar_headers = ["CUST PO", "SALESPERSON", "SHIP VIA", "CARRIER", "TRAILER / ST."]
+    bar_vals    = [inv.get("cust_po",""), company.get("salesperson",""),
+                   company.get("ship_via",""), company.get("carrier",""), ""]
+    col_w = W / len(bar_headers)
+
+    pdf.set_xy(15, y_meta)
+    pdf.set_fill_color(*BLACK)
+    pdf.set_text_color(*WHITE)
+    pdf.set_font("Helvetica", "B", 7)
+    for h in bar_headers:
+        pdf.cell(col_w, 5, h, border=1, align="C", fill=True)
+    pdf.ln()
+
+    pdf.set_xy(15, y_meta + 5)
+    pdf.set_fill_color(*WHITE)
+    pdf.set_text_color(*BLACK)
+    pdf.set_font("Helvetica", "", 7.5)
+    for v in bar_vals:
+        pdf.cell(col_w, 5, v, border=1, align="C")
+    pdf.ln()
+
+    # ── Line items table ──
+    y_items = y_meta + 12
+    col_widths = [22, 28, 100, 30]
+    col_headers = ["SHIPPED", "PACK SIZE", "DESCRIPTION", "PRICE"]
+
+    pdf.set_xy(15, y_items)
+    pdf.set_fill_color(*BLACK)
+    pdf.set_text_color(*WHITE)
+    pdf.set_font("Helvetica", "B", 7)
+    aligns = ["C","C","L","R"]
+    for i, h in enumerate(col_headers):
+        pdf.cell(col_widths[i], 5.5, h, align=aligns[i], fill=True)
+    pdf.ln()
+
+    pdf.set_font("Helvetica", "", 8)
+    row_y = y_items + 5.5
+    fill = False
+    for item in inv["items"]:
+        qty   = str(item.get("qty",""))
+        pack  = str(item.get("pack",""))
+        desc  = str(item.get("desc",""))
+        try:
+            price_fmt = f"$ {float(item.get('price') or 0):,.2f}"
+        except Exception:
+            price_fmt = str(item.get("price",""))
+        bg = LTGRAY if fill else WHITE
+        pdf.set_fill_color(*bg)
+        pdf.set_text_color(*BLACK)
+        pdf.set_xy(15, row_y)
+        pdf.cell(col_widths[0], 5, qty,        align="C", fill=True, border="B")
+        pdf.cell(col_widths[1], 5, pack,       align="C", fill=True, border="B")
+        pdf.cell(col_widths[2], 5, desc,       align="L", fill=True, border="B")
+        pdf.cell(col_widths[3], 5, price_fmt,  align="R", fill=True, border="B")
+        pdf.ln()
+        row_y += 5
+        fill = not fill
+
+    # filler rows
+    for _ in range(max(0, 5 - len(inv["items"]))):
+        pdf.set_fill_color(*WHITE)
+        pdf.set_xy(15, row_y)
+        for w in col_widths:
+            pdf.cell(w, 5, "", fill=True, border="B")
+        pdf.ln()
+        row_y += 5
+
+    # ── Footer totals ──
+    total_qty = sum(int(i.get("qty") or 0) for i in inv["items"])
+    try:
+        total_price = sum(int(i.get("qty") or 0) * float(i.get("price") or 0) for i in inv["items"])
+        total_fmt = f"$ {total_price:,.2f}"
+    except Exception:
+        total_fmt = ""
+
+    y_foot = row_y + 3
+    pdf.set_line_width(0.6)
+    pdf.line(15, y_foot, 195, y_foot)
+    pdf.set_line_width(0.2)
+
+    pdf.set_xy(15, y_foot + 2)
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_text_color(*BLACK)
+    pdf.cell(60, 8, str(total_qty))
+
+    pdf.set_xy(120, y_foot + 2)
+    pdf.set_font("Helvetica", "", 7)
+    pdf.set_text_color(*DKGRAY)
+    pdf.cell(75, 4, "TOTAL", align="R", ln=True)
+    pdf.set_xy(120, y_foot + 6)
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_text_color(*BLACK)
+    pdf.cell(75, 8, total_fmt, align="R")
+
+    # ── Optional message ──
+    if inv.get("message","").strip():
+        y_msg = y_foot + 20
+        pdf.set_xy(15, y_msg)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(*DKGRAY)
+        pdf.multi_cell(W, 5, inv["message"].strip())
+
+    # ── Date stamp ──
+    pdf.set_xy(15, 280)
+    pdf.set_font("Helvetica", "", 7)
+    pdf.set_text_color(180,180,180)
+    pdf.cell(W, 4, date.today().strftime("%m/%d/%y"), align="R")
+
+    return bytes(pdf.output())
+
 def html_to_pdf(html: str) -> bytes:
-    if HAS_WEASYPRINT:
-        buf = io.BytesIO()
-        WP_HTML(string=html).write_pdf(buf)
-        return buf.getvalue()
-    # Fallback: return the HTML as bytes so the user can print-to-PDF from browser
+    # kept for HTML preview only — PDF is built natively via build_invoice_pdf
     return html.encode("utf-8")
 
 def pdf_filename(inv_num):
-    return f"invoice_{inv_num}.{'pdf' if HAS_WEASYPRINT else 'html'}"
+    return f"invoice_{inv_num}.pdf"
 
 # ══════════════════════════════════════
 # Email
 # ══════════════════════════════════════
 
 def send_invoice_email(smtp_user, smtp_pass, recipients, subject, body, pdf_bytes, inv_num):
-    msg = MIMEMultipart()
-    msg["From"]    = smtp_user
-    msg["To"]      = ", ".join(recipients)
-    msg["Subject"] = subject
-
-    msg.attach(MIMEText(body, "plain"))
+    """Send via SendGrid API. smtp_user = from address, smtp_pass = SG. API key."""
+    import urllib.request
+    import json as _json
 
     fname = pdf_filename(inv_num)
-    mime_type = "pdf" if HAS_WEASYPRINT else "html"
-    att = MIMEApplication(pdf_bytes, _subtype=mime_type)
-    att.add_header("Content-Disposition", "attachment", filename=fname)
-    msg.attach(att)
+    attachment_b64 = base64.b64encode(pdf_bytes).decode()
+    mime_type = "application/pdf"
 
-    ctx = ssl.create_default_context()
-    with smtplib.SMTP("smtp.gmail.com", 587) as server:
-        server.ehlo()
-        server.starttls(context=ctx)
-        server.login(smtp_user, smtp_pass)
-        server.sendmail(smtp_user, recipients, msg.as_string())
+    payload = {
+        "personalizations": [{"to": [{"email": r} for r in recipients]}],
+        "from": {"email": smtp_user},
+        "subject": subject,
+        "content": [{"type": "text/plain", "value": body}],
+        "attachments": [{
+            "content": attachment_b64,
+            "type": mime_type,
+            "filename": fname,
+        }]
+    }
+
+    data = _json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.sendgrid.com/v3/mail/send",
+        data=data,
+        headers={
+            "Authorization": f"Bearer {smtp_pass}",
+            "Content-Type": "application/json",
+        },
+        method="POST"
+    )
+    with urllib.request.urlopen(req) as resp:
+        if resp.status not in (200, 202):
+            raise Exception(f"SendGrid error {resp.status}: {resp.read().decode()}")
 
 
 # ══════════════════════════════════════
@@ -380,10 +609,10 @@ def company_settings_tab():
             if LOGO_FILE.exists(): LOGO_FILE.unlink()
 
     st.markdown("---")
-    st.subheader("Email credentials (Gmail)")
-    co["smtp_user"] = st.text_input("Your Gmail address", co.get("smtp_user",""))
-    co["smtp_pass"] = st.text_input("Gmail app password", co.get("smtp_pass",""), type="password",
-        help="Generate a 16-character app password at myaccount.google.com → Security → App passwords")
+    st.subheader("Email credentials (SendGrid)")
+    co["smtp_user"] = st.text_input("From email address (must match your SendGrid sender)", co.get("smtp_user",""))
+    co["smtp_pass"] = st.text_input("SendGrid API key", co.get("smtp_pass",""), type="password",
+        help="Starts with SG. — create one at sendgrid.com → Settings → API Keys")
 
     if st.button("💾  Save company settings", type="primary"):
         save_company(co)
@@ -555,14 +784,13 @@ def invoice_tab():
     st.components.v1.html(html, height=820, scrolling=True)
 
     # ── Download ──
-    pdf_bytes = html_to_pdf(html)
+    pdf_bytes = build_invoice_pdf(inv, co, logo_b64)
     fname = pdf_filename(inv_num)
-    mime  = "application/pdf" if HAS_WEASYPRINT else "text/html"
     st.download_button(
-        label=f"⬇️  Download {'PDF' if HAS_WEASYPRINT else 'HTML (print to PDF)'}",
+        label="⬇️  Download PDF",
         data=pdf_bytes,
         file_name=fname,
-        mime=mime,
+        mime="application/pdf",
     )
 
     st.markdown("---")
@@ -573,7 +801,7 @@ def invoice_tab():
     smtp_pass = co.get("smtp_pass","")
 
     if not smtp_user or not smtp_pass:
-        st.warning("Set your Gmail address and app password in the **Company Settings** tab first.")
+        st.warning("Set your SendGrid API key and from-address in the **Company Settings** tab first.")
     else:
         default_recipients = cust_email
         recipients_raw = st.text_input(
@@ -602,11 +830,12 @@ def invoice_tab():
             else:
                 with st.spinner("Sending…"):
                     try:
+                        email_pdf = build_invoice_pdf(inv, co, logo_b64)
                         send_invoice_email(
                             smtp_user, smtp_pass,
                             recipients,
                             email_subject, email_body,
-                            pdf_bytes, inv_num
+                            email_pdf, inv_num
                         )
                         st.session_state.email_status = ("success", f"Invoice sent to: {', '.join(recipients)}")
                     except Exception as e:

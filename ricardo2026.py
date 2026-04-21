@@ -306,20 +306,37 @@ def send_invoice_email(smtp_user, smtp_pass, recipients, subject, body, pdf_byte
 # Session state init
 # ══════════════════════════════════════
 
+BLANK_ITEM = {"qty": "", "pack": "CASE", "desc": "", "price": ""}
+
+def safe_items():
+    try:
+        raw = st.session_state.get("items", None)
+        if not isinstance(raw, list) or len(raw) == 0:
+            return [BLANK_ITEM.copy()]
+        return [i if isinstance(i, dict) else BLANK_ITEM.copy() for i in raw]
+    except Exception:
+        return [BLANK_ITEM.copy()]
+
 def init_state():
-    if "items" not in st.session_state or not isinstance(st.session_state.items, list):
-        st.session_state.items = [{"qty": "", "pack": "CASE", "desc": "", "price": ""}]
-    # Ensure every item is a dict (guard against corrupt state)
-    st.session_state.items = [
-        i if isinstance(i, dict) else {"qty": "", "pack": "CASE", "desc": "", "price": ""}
-        for i in st.session_state.items
-    ]
+    try:
+        st.session_state.items = safe_items()
+    except Exception:
+        st.session_state["items"] = [{"qty": "", "pack": "CASE", "desc": "", "price": ""}]
     if "company" not in st.session_state:
-        st.session_state.company = load_company()
+        try:
+            st.session_state.company = load_company()
+        except Exception:
+            st.session_state.company = {}
     if "customers" not in st.session_state:
-        st.session_state.customers = load_customers()
+        try:
+            st.session_state.customers = load_customers()
+        except Exception:
+            st.session_state.customers = {}
     if "logo_b64" not in st.session_state:
-        st.session_state.logo_b64 = load_logo_b64()
+        try:
+            st.session_state.logo_b64 = load_logo_b64()
+        except Exception:
+            st.session_state.logo_b64 = ""
     if "selected_customer" not in st.session_state:
         st.session_state.selected_customer = ""
     if "email_status" not in st.session_state:
@@ -618,12 +635,24 @@ st.markdown("""
 
 st.title("🧾 Invoice Builder")
 
-init_state()
+try:
+    init_state()
+except Exception as e:
+    st.session_state["items"] = [{"qty": "", "pack": "CASE", "desc": "", "price": ""}]
+    st.session_state["company"] = load_company()
+    st.session_state["customers"] = load_customers()
+    st.session_state["logo_b64"] = ""
+    st.session_state["selected_customer"] = ""
+    st.session_state["email_status"] = None
 
 tab1, tab2, tab3 = st.tabs(["📄  Create Invoice", "👥  Customers", "🏢  Company Settings"])
 
 with tab1:
-    invoice_tab()
+    try:
+        invoice_tab()
+    except Exception as e:
+        st.error(f"Invoice tab error: {e}")
+        st.info("Try refreshing the page.")
 with tab2:
     customers_tab()
 with tab3:

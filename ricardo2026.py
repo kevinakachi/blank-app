@@ -318,7 +318,7 @@ def init_state():
         st.session_state.company = load_company()
     if "customers" not in st.session_state:
         st.session_state.customers = load_customers()
-    if "logo_b64" not in st.session_state:
+    if "logo_b64" not in st.session_state
         st.session_state.logo_b64 = load_logo_b64()
     if "selected_customer" not in st.session_state:
         st.session_state.selected_customer = ""

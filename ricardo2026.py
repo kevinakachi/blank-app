@@ -310,7 +310,7 @@ BLANK_ITEM = {"qty": "", "pack": "CASE", "desc": "", "price": ""}
 
 def safe_items():
     try:
-        raw = st.session_state["items"] if "items" in st.session_state else None
+        raw = st.session_state["line_items"] if "line_items" in st.session_state else None
         if not isinstance(raw, list) or len(raw) == 0:
             return [BLANK_ITEM.copy()]
         return [i if isinstance(i, dict) else BLANK_ITEM.copy() for i in raw]
@@ -319,9 +319,9 @@ def safe_items():
 
 def init_state():
     try:
-        st.session_state.items = safe_items()
+        st.session_state["line_items"] = safe_items()
     except Exception:
-        st.session_state["items"] = [{"qty": "", "pack": "CASE", "desc": "", "price": ""}]
+        st.session_state["line_items"] = [{"qty": "", "pack": "CASE", "desc": "", "price": ""}]
     if "company" not in st.session_state:
         try:
             st.session_state.company = load_company()
@@ -493,9 +493,9 @@ def invoice_tab():
     header_cols[2].markdown("**Description**")
     header_cols[3].markdown("**Price / case ($)**")
 
-    items = st.session_state.items
+    line_items = st.session_state["line_items"]
     to_delete = None
-    for i, item in enumerate(items):
+    for i, item in enumerate(line_items):
         c1, c2, c3, c4, c5 = st.columns([1, 1.4, 4, 1.5, 0.5])
         item["qty"]   = c1.text_input("", value=item.get("qty",""),  key=f"qty_{i}",  label_visibility="collapsed")
         item["pack"]  = c2.text_input("", value=item.get("pack","CASE"), key=f"pack_{i}", label_visibility="collapsed")
@@ -505,17 +505,17 @@ def invoice_tab():
             to_delete = i
 
     if to_delete is not None:
-        items.pop(to_delete)
+        line_items.pop(to_delete)
         st.rerun()
 
     if st.button("＋  Add line item"):
-        items.append({"qty":"","pack":"CASE","desc":"","price":""})
+        line_items.append({"qty":"","pack":"CASE","desc":"","price":""})
         st.rerun()
 
     # ── Totals summary ──
     try:
-        total_qty   = sum(int(it.get("qty") or 0) for it in items)
-        total_price = sum(int(it.get("qty") or 0) * float(it.get("price") or 0) for it in items)
+        total_qty   = sum(int(it.get("qty") or 0) for it in line_items)
+        total_price = sum(int(it.get("qty") or 0) * float(it.get("price") or 0) for it in line_items)
         t1, t2 = st.columns([3,1])
         t1.metric("Total cases", total_qty)
         t2.metric("Invoice total", f"${total_price:,.2f}")
@@ -543,7 +543,7 @@ def invoice_tab():
         "cust_name":  cust_name,
         "cust_addr":  cust_addr,
         "cust_phone": cust_phone,
-        "items":      items,
+        "items":      line_items,
         "message":    message,
     }
 
@@ -638,7 +638,7 @@ st.title("🧾 Invoice Builder")
 try:
     init_state()
 except Exception as e:
-    st.session_state["items"] = [{"qty": "", "pack": "CASE", "desc": "", "price": ""}]
+    st.session_state["line_items"] = [{"qty": "", "pack": "CASE", "desc": "", "price": ""}]
     st.session_state["company"] = load_company()
     st.session_state["customers"] = load_customers()
     st.session_state["logo_b64"] = ""

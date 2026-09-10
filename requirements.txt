@@ -1,2 +1,7 @@
-streamlit>=1.32.0
-fpdf2>=2.7.0
+streamlit
+pandas
+openpyxl
+xlsxwriter
+streamlit-authenticator>=0.2.0
+streamlit==1.61.0
+starlette<1.4.0

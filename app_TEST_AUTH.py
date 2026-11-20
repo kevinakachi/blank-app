@@ -51,6 +51,10 @@ if st.session_state.logged_in_initials is None:
 current_initials = st.session_state.logged_in_initials
 current_buyer = buyers[current_initials]
 
+st.success("Buyer login successful!")
+st.write("Selected initials:", current_initials)
+st.write("Buyer name:", current_buyer["name"])
+
 with st.sidebar:
 
     st.write(

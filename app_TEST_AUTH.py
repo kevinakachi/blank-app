@@ -8,6 +8,10 @@ import requests
 import base64
 import html
 
+# ============================================================
+# PAGE CONFIGURATION
+# ============================================================
+
 st.set_page_config(
     page_title="Uncommunicated Subs and Cuts Report",
     page_icon="📊",
@@ -17,12 +21,13 @@ st.set_page_config(
 st.title("📊 Uncommunicated Subs and Cuts Report")
 
 # ============================================================
-# CONFIGURATION
+# MICROSOFT CONFIGURATION
 # ============================================================
 
 SCOPES = ["User.Read", "Mail.Send"]
 
 GRAPH_URL = "https://graph.microsoft.com/v1.0"
+
 
 # ============================================================
 # BUYER DIRECTORY + LOGIN
@@ -43,17 +48,16 @@ if st.session_state.logged_in_initials is None:
     )
 
     if st.button("Continue"):
+
         st.session_state.logged_in_initials = initials_input
+
         st.rerun()
 
     st.stop()
 
 current_initials = st.session_state.logged_in_initials
-current_buyer = buyers[current_initials]
 
-st.success("Buyer login successful!")
-st.write("Selected initials:", current_initials)
-st.write("Buyer name:", current_buyer["name"])
+current_buyer = buyers[current_initials]
 
 with st.sidebar:
 
@@ -63,7 +67,9 @@ with st.sidebar:
     )
 
     if st.button("Switch user"):
+
         st.session_state.logged_in_initials = None
+
         st.rerun()
 
 
@@ -92,69 +98,6 @@ def get_msal_client():
     return client, cache
 
 
-def connect_microsoft():
-
-    try:
-
-        client, cache = get_msal_client()
-
-        flow = client.initiate_device_flow(
-            scopes=SCOPES
-        )
-
-        if "user_code" not in flow:
-            st.error("Unable to start Microsoft authentication.")
-            return
-
-        st.info(
-            "Open https://microsoft.com/devicelogin "
-            "in another browser tab."
-        )
-
-        st.subheader("Your Microsoft login code")
-
-        st.code(flow["user_code"])
-
-        st.warning(
-            "Enter the code on Microsoft's website, "
-            "sign in with your company account, "
-            "and approve the Authenticator request."
-        )
-
-        with st.spinner("Waiting for Microsoft authentication..."):
-
-            result = client.acquire_token_by_device_flow(flow)
-
-        if "access_token" in result:
-
-            st.session_state["msal_cache"] = cache.serialize()
-
-            account = result.get("id_token_claims", {})
-
-            st.session_state["msal_account"] = (
-                account.get("preferred_username")
-                or account.get("upn")
-                or "Microsoft account"
-            )
-
-            st.success("Microsoft authentication successful!")
-
-            st.rerun()
-
-        else:
-
-            st.error(
-                result.get(
-                    "error_description",
-                    result.get("error", "Authentication failed")
-                )
-            )
-
-    except Exception as e:
-
-        st.error(f"Authentication error: {e}")
-
-
 def get_graph_token():
 
     try:
@@ -172,23 +115,102 @@ def get_graph_token():
         )
 
         if cache.has_state_changed:
+
             st.session_state["msal_cache"] = cache.serialize()
 
         if result and "access_token" in result:
+
             return result["access_token"]
 
         return None
 
     except Exception:
+
         return None
 
 
-def logout_microsoft():
+def connect_microsoft():
 
-    st.session_state.pop("msal_cache", None)
-    st.session_state.pop("msal_account", None)
+    try:
 
-    st.rerun()
+        client, cache = get_msal_client()
+
+        flow = client.initiate_device_flow(
+            scopes=SCOPES
+        )
+
+        if "user_code" not in flow:
+
+            st.error(
+                "Could not start Microsoft authentication: "
+                + str(flow)
+            )
+
+            return None
+
+        st.info(
+            "Microsoft authentication is required."
+        )
+
+        verification_url = flow.get(
+            "verification_uri",
+            "https://microsoft.com/devicelogin"
+        )
+
+        st.markdown(
+            f"[Open Microsoft login]({verification_url})"
+        )
+
+        st.subheader("Your Microsoft authentication code")
+
+        st.code(flow["user_code"])
+
+        st.warning(
+            "Open the Microsoft login page, enter the code, "
+            "sign in with your company account, and approve "
+            "the Microsoft Authenticator request."
+        )
+
+        with st.spinner(
+            "Waiting for Microsoft authentication..."
+        ):
+
+            result = client.acquire_token_by_device_flow(flow)
+
+        if "access_token" not in result:
+
+            st.error(
+                result.get(
+                    "error_description",
+                    result.get("error", "Authentication failed")
+                )
+            )
+
+            return None
+
+        st.session_state["msal_cache"] = cache.serialize()
+
+        account = result.get("id_token_claims", {})
+
+        st.session_state["msal_account"] = (
+            account.get("preferred_username")
+            or account.get("upn")
+            or "Microsoft account"
+        )
+
+        st.success(
+            "Microsoft authentication successful!"
+        )
+
+        return result["access_token"]
+
+    except Exception as e:
+
+        st.error(
+            f"Microsoft authentication error: {e}"
+        )
+
+        return None
 
 # ============================================================
 # REPORT PROCESSING
@@ -196,7 +218,10 @@ def logout_microsoft():
 
 def process_files(csv_file, excel_file):
 
-    main_df = pd.read_csv(csv_file, dtype=str)
+    main_df = pd.read_csv(
+        csv_file,
+        dtype=str
+    )
 
     subs_df = pd.read_excel(
         excel_file,
@@ -206,6 +231,8 @@ def process_files(csv_file, excel_file):
         engine="openpyxl"
     )
 
+    # Assign NTF to NEWTOR rows with blank BUY
+
     main_df.loc[
         (main_df["VEND"] == "NEWTOR")
         & (
@@ -214,6 +241,8 @@ def process_files(csv_file, excel_file):
         ),
         "BUY"
     ] = "NTF"
+
+    # Remove subtotal and unwanted rows
 
     values_to_remove = [
         'SUBTOTAL FOR :',
@@ -241,17 +270,25 @@ def process_files(csv_file, excel_file):
         ~main_df["BUY"].isin(values_to_remove)
     ]
 
+    # Remove BO reason codes
+
     main_df = main_df[
         ~main_df["REASON CODE"].isin(["BO"])
     ]
+
+    # Remove LT reason codes
 
     main_df = main_df[
         ~main_df["REASON CODE"].isin(["LT"])
     ]
 
+    # Remove OT warehouse rows
+
     main_df = main_df[
         ~main_df["WH"].isin(["OT"])
     ]
+
+    # Convert product numbers
 
     main_df["ORIG. PROD"] = pd.to_numeric(
         main_df["ORIG. PROD"],
@@ -279,13 +316,23 @@ def process_files(csv_file, excel_file):
         subs_df["SKU #"].astype(int).astype(str)
     )
 
+    # Count unassigned buyers
+
     blank_buy_count = main_df["BUY"].isna().sum()
+
+    # Identify mismatched products
 
     mismatched_df = main_df[
         ~main_df["ORIG. PROD"].isin(subs_df["SKU #"])
     ]
 
-    today_date = datetime.datetime.today().strftime("%d-%b-%y")
+    # Today's date
+
+    today_date = datetime.datetime.today().strftime(
+        "%d-%b-%y"
+    )
+
+    # Count mismatches by buyer
 
     result = (
         mismatched_df.groupby("BUY")
@@ -293,9 +340,19 @@ def process_files(csv_file, excel_file):
         .reset_index(name=today_date)
     )
 
+    # Include all buyers, even those with zero mismatches
+
     all_buyers = [
-        "AMC", "VGS", "SSW", "KAM", "DD",
-        "LA", "MD", "KSM", "GEC", "NTF"
+        "AMC",
+        "VGS",
+        "SSW",
+        "KAM",
+        "DD",
+        "LA",
+        "MD",
+        "KSM",
+        "GEC",
+        "NTF"
     ]
 
     result = (
@@ -305,6 +362,8 @@ def process_files(csv_file, excel_file):
     )
 
     result[today_date] = result[today_date].astype(int)
+
+    # Add NOT ASSIGNED row if applicable
 
     if blank_buy_count > 0:
 
@@ -318,6 +377,8 @@ def process_files(csv_file, excel_file):
             ignore_index=True
         )
 
+    # Prepare missed products details
+
     missed_products_df = mismatched_df[
         [
             "BUY",
@@ -329,7 +390,6 @@ def process_files(csv_file, excel_file):
     ].drop_duplicates()
 
     return result, missed_products_df, today_date
-
 
 # ============================================================
 # EMAIL SENDING - MICROSOFT GRAPH API
@@ -346,14 +406,24 @@ def send_email(
 
     try:
 
+        # Check existing Microsoft authentication
+
         access_token = get_graph_token()
+
+        # Authenticate if necessary
+
+        if not access_token:
+
+            access_token = connect_microsoft()
 
         if not access_token:
 
             return (
-                "❌ Microsoft authentication expired or missing. "
-                "Please reconnect your Microsoft account."
+                "❌ Microsoft authentication unsuccessful. "
+                "Please try again."
             )
+
+        # Email configuration
 
         sender_email = st.secrets["smtp"]["sender_email"]
 
@@ -371,12 +441,14 @@ def send_email(
 
             return "❌ No email recipients configured."
 
+        # Microsoft Graph headers
+
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json"
         }
 
-        # Verify the signed-in Microsoft account
+        # Verify Microsoft account
 
         me_response = requests.get(
             f"{GRAPH_URL}/me",
@@ -406,6 +478,8 @@ def send_email(
                 f"but the configured sender is {sender_email}. "
                 "Please use the correct Microsoft account."
             )
+
+        # Email subject
 
         subject = (
             f"Uncommunicated Subs and Cuts Report - {today_date}"
@@ -439,11 +513,14 @@ def send_email(
         for _, row in result.iterrows():
 
             buyer = html.escape(str(row["BUY"]))
+
             count = html.escape(str(row[today_date]))
 
             html_content += (
-                f"<tr><td>{buyer}</td>"
-                f"<td style='text-align: center;'>{count}</td></tr>"
+                f"<tr>"
+                f"<td>{buyer}</td>"
+                f"<td style='text-align: center;'>{count}</td>"
+                f"</tr>"
             )
 
         html_content += f"""
@@ -496,7 +573,9 @@ def send_email(
         # Prepare email payload
 
         email_data = {
+
             "message": {
+
                 "subject": subject,
 
                 "body": {
@@ -514,6 +593,7 @@ def send_email(
                 ],
 
                 "attachments": [
+
                     {
                         "@odata.type": "#microsoft.graph.fileAttachment",
                         "name": f"SummaryRP90_{today_date}.xlsx",
@@ -523,6 +603,7 @@ def send_email(
                         ),
                         "contentBytes": summary_attachment
                     },
+
                     {
                         "@odata.type": "#microsoft.graph.fileAttachment",
                         "name": excel_file.name,
@@ -532,13 +613,14 @@ def send_email(
                         ),
                         "contentBytes": original_attachment
                     }
+
                 ]
             },
 
             "saveToSentItems": True
         }
 
-        # Send email using Microsoft Graph
+        # Send through Microsoft Graph
 
         response = requests.post(
             f"{GRAPH_URL}/me/sendMail",
@@ -557,8 +639,8 @@ def send_email(
         if response.status_code == 401:
 
             return (
-                "❌ Microsoft authentication expired. "
-                "Please reconnect your Microsoft account."
+                "❌ Microsoft authentication expired or invalid. "
+                "Please authenticate again."
             )
 
         if response.status_code == 403:
@@ -577,3 +659,154 @@ def send_email(
     except Exception as e:
 
         return f"❌ Error sending email: {str(e)}"
+
+# ============================================================
+# STREAMLIT REPORT INTERFACE
+# ============================================================
+
+st.divider()
+
+st.write(
+    "Upload your CSV and Excel files below to process the report."
+)
+
+
+# ============================================================
+# FILE UPLOADS
+# ============================================================
+
+csv_file = st.file_uploader(
+    "Upload RP90 (CSV format)",
+    type=["csv"]
+)
+
+excel_file = st.file_uploader(
+    "Upload Subs & Cuts file (XLSM format)",
+    type=["xlsm", "xlsx"]
+)
+
+
+# ============================================================
+# SESSION STATE
+# ============================================================
+
+if "result" not in st.session_state:
+
+    st.session_state.result = None
+
+if "missed_products_df" not in st.session_state:
+
+    st.session_state.missed_products_df = None
+
+if "today_date" not in st.session_state:
+
+    st.session_state.today_date = None
+
+
+# ============================================================
+# PROCESS FILES
+# ============================================================
+
+if csv_file and excel_file:
+
+    st.success("Files uploaded successfully!")
+
+    if st.button("Process Files"):
+
+        try:
+
+            with st.spinner("Processing report..."):
+
+                result, missed_products_df, today_date = process_files(
+                    csv_file,
+                    excel_file
+                )
+
+                st.session_state.result = result
+
+                st.session_state.missed_products_df = missed_products_df
+
+                st.session_state.today_date = today_date
+
+            st.success("Report processed successfully!")
+
+        except Exception as e:
+
+            st.error(
+                f"Error processing files: {e}"
+            )
+
+
+# ============================================================
+# DISPLAY REPORT
+# ============================================================
+
+if (
+    st.session_state.result is not None
+    and st.session_state.missed_products_df is not None
+):
+
+    st.divider()
+
+    st.subheader("Mismatched Items Report")
+
+    st.dataframe(
+        st.session_state.result,
+        use_container_width=True
+    )
+
+    st.subheader("Details of Missed Products")
+
+    st.dataframe(
+        st.session_state.missed_products_df,
+        use_container_width=True
+    )
+
+
+    # ========================================================
+    # SEND EMAIL
+    # ========================================================
+
+    st.divider()
+
+    st.subheader("Send Report by Email")
+
+    st.write(
+        "Click below to send the report. "
+        "If Microsoft authentication is required, "
+        "you will be asked to sign in."
+    )
+
+    if st.button(
+        "Send the Email",
+        type="primary"
+    ):
+
+        if excel_file is None:
+
+            st.error(
+                "Please upload the original Excel file again."
+            )
+
+        else:
+
+            with st.spinner(
+                "Authenticating and sending your report..."
+            ):
+
+                email_status = send_email(
+                    st.session_state.result,
+                    st.session_state.missed_products_df,
+                    st.session_state.today_date,
+                    excel_file,
+                    current_initials,
+                    current_buyer["name"]
+                )
+
+            if email_status.startswith("✅"):
+
+                st.success(email_status)
+
+            else:
+
+                st.error(email_status)

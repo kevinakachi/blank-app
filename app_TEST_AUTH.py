@@ -666,11 +666,6 @@ def send_email(
 
 st.divider()
 
-st.write(
-    "Upload your CSV and Excel files below to process the report."
-)
-
-
 # ============================================================
 # FILE UPLOADS
 # ============================================================
